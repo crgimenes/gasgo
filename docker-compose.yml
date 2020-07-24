@@ -6,7 +6,7 @@ networks:
 
 services:
   db:
-    image: 'postgres'
+    image: 'postgres:12-alpine'
     restart: 'always'
     networks:
       - db
