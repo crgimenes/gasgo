@@ -1,8 +1,15 @@
 version: '3'
+
+networks:
+  db:
+    external: false
+
 services:
   db:
     image: 'postgres'
     restart: 'always'
+    networks:
+      - db
     ports:
       - "5433:5432" # Alternative port so it won't conflict if you have a local PostgreSQL
     environment:
