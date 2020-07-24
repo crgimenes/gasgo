@@ -1,0 +1,17 @@
+version: '3'
+services:
+  db:
+    image: 'postgres'
+    restart: 'always'
+    ports:
+      - "5433:5432" # Alternative port so it won't conflict if you have a local PostgreSQL
+    environment:
+      POSTGRES_DB: gasgo_db
+      POSTGRES_USER: gasgo_user
+      POSTGRES_PASSWORD: gasgo_password
+    volumes:
+      - ./database/scripts/draft_db.sql:/docker-entrypoint-initdb.d
+      - postgres_data:/var/lib/postgresql/data
+volumes:
+  postgres_data:
+
