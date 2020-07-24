@@ -1,9 +1,3 @@
-CREATE DATABASE gasgo
-    WITH 
-    OWNER = postgres
-    ENCODING = 'UTF8'
-    CONNECTION LIMIT = -1;
-
 CREATE TABLE main
 (
     id             uuid    NOT NULL,
