@@ -1,0 +1,22 @@
+on: [push, pull_request]
+name: Go Test
+jobs:
+  test:
+    strategy:
+      matrix:
+        go-version: [1.14.x]
+        platform: [ubuntu-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Install Go
+      uses: actions/setup-go@v1
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: Format
+      run: echo "valid if the command returns some value from GoFMT" && [ -z $(shell gofmt -l . | grep ".go") ] && true || false
+    - name: Security
+      run: go get github.com/securego/gosec/cmd/gosec; `go env GOPATH`/bin/gosec ./...
+    - name: Testing
+      run:  go test -v ./...
