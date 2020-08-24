@@ -1,5 +1,7 @@
+CREATE ROLE gasgo WITH LOGIN PASSWORD 'gasgopass';
+
 CREATE DATABASE gasgo
     WITH 
-    OWNER = postgres
+    OWNER = gasgo
     ENCODING = 'UTF8'
     CONNECTION LIMIT = -1;
