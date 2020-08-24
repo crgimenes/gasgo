@@ -1,6 +1,8 @@
 package metadata
 
-import "github.com/google/uuid"
+import (
+	"github.com/google/uuid"
+)
 
 // Dataset define the base of the data type
 type Dataset interface {
