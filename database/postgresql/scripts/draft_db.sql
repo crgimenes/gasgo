@@ -6,6 +6,8 @@ BEGIN
 END;
 $$ LANGUAGE 'plpgsql';
 
+ALTER FUNCTION UUID() OWNER TO gasgo;
+
 CREATE TABLE main
 (
     id             uuid NOT NULL DEFAULT uuid(),
@@ -24,9 +26,13 @@ CREATE TABLE metadata
     PRIMARY KEY (id)
 );
 
+ALTER TABLE main OWNER TO gasgo;
+
 ALTER TABLE main
     ADD CONSTRAINT metadata_fk FOREIGN KEY (metadata_id)
     REFERENCES metadata (id) MATCH SIMPLE
     ON UPDATE NO ACTION
     ON DELETE NO ACTION
     NOT VALID;
+
+ALTER TABLE metadata OWNER TO gasgo;
