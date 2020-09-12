@@ -7,8 +7,8 @@ type Config struct {
 	MetadataFile string `json:"metadata_file" cfg:"metadata_file"`
 }
 
-// Parce condig parameters
-func Parce() (*Config, error) {
+// Parse condig parameters
+func Parse() (*Config, error) {
 	cfg := &Config{}
 
 	err := goconfig.Parse(cfg)
