@@ -1,4 +1,4 @@
-module github.com/gasgo/gasgo
+module github.com/gosidekick/gasgo
 
 go 1.14
 

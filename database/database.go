@@ -1,7 +1,7 @@
 package database
 
 import (
-	"github.com/gasgo/gasgo/metadata"
+	"github.com/gosidekick/gasgo/metadata"
 	"github.com/google/uuid"
 )
 

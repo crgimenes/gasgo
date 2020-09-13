@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/gasgo/gasgo/config"
+	"github.com/gosidekick/gasgo/config"
 )
 
 func main() {
