@@ -10,12 +10,16 @@ type Dataset interface {
 	String() string
 }
 
+// Loader define metadata loader interface
+type Loader interface {
+	LoadMetadata() Metadata
+}
+
 // Metadata define data structure
 type Metadata struct {
-	ID         uuid.UUID
-	Name       string
-	Type       string
-	Unique     bool
-	Parameters map[string]string
-	NestedMeta []Metadata
+	ID         uuid.UUID         `json:"id,omitempty"`
+	Name       string            `json:"name"`
+	Type       string            `json:"type"`
+	Parameters map[string]string `json:"parameters,omitempty"`
+	NestedMeta []Metadata        `json:"nested_meta,omitempty"`
 }
