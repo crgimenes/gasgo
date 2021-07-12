@@ -8,6 +8,11 @@
 [![Gitpod Ready-to-Code](https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/gosidekick/gasgo) 
 
 
+## WIP
+
+**This is a work in progress.**
+
+We are currently writing the specification and detailing how it works.
 
 ## Contributing
 
