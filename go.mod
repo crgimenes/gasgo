@@ -1,6 +1,6 @@
-module github.com/gosidekick/gasgo
+module github.com/crgimenes/gasgo
 
-go 1.14
+go 1.23
 
 require (
 	github.com/crgimenes/goconfig v1.2.1
