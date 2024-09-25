@@ -3,14 +3,19 @@ package main
 import (
 	"fmt"
 
-	"github.com/gosidekick/gasgo/config"
+	"github.com/crgimenes/gasgo/config"
+)
+
+var (
+	GitTag string = "dev"
 )
 
 func main() {
-	cfg, err := config.Parse()
+	config.GitTag = GitTag
+	err := config.Load()
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	fmt.Println("metadata: ", cfg.MetadataFile)
+	fmt.Println("Version:", config.CFG.Version)
 }
