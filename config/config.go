@@ -1,270 +1,213 @@
 package config
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
-	lua "github.com/yuin/gopher-lua"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 )
 
 type Config struct {
-	APIBaseURL string `json:"api_base_url,omitempty"`
-	Version    string `json:"-"`
+	BaseURL string
 }
 
 var (
-	GitTag string = "dev"
-	CFG    *Config
+	db          *sqlx.DB
+	GitTag      string = "dev"
+	CFG         *Config
+	DataBaseURL string
+	Version     string
 )
 
-func castLuaInt(ls *lua.LState, vGlobal string) int {
-	v, ok := ls.GetGlobal(vGlobal).(lua.LNumber)
-	if !ok {
-		log.Fatalf("Erro ao converter %q para int", vGlobal)
+func open(dbsource string) (*sqlx.DB, error) {
+	var err error
+	db, err = sqlx.Open("postgres", dbsource)
+	if err != nil {
+		err = fmt.Errorf("error open db: %v", err)
+		return nil, err
 	}
-	return int(v)
+
+	err = db.Ping()
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	db.SetMaxOpenConns(50)                 // Set maximum number of open connections to the database
+	db.SetMaxIdleConns(30)                 // Set maximum number of connections in the idle connection pool
+	db.SetConnMaxLifetime(5 * time.Minute) // Set the maximum lifetime of a connection to the database
+
+	return db, nil
 }
 
-func castLuaString(ls *lua.LState, vGlobal string) string {
-	v, ok := ls.GetGlobal(vGlobal).(lua.LString)
-	if !ok {
-		log.Fatalf("Erro ao converter %q para string", vGlobal)
+// get parameters from the database
+func getParameters(appName string) (map[string]string, error) {
+	var err error
+	DataBaseURL = os.Getenv("DATABASE_URL")
+	if DataBaseURL == "" {
+		log.Fatal("DATABASE_URL not set")
 	}
-	return string(v)
+
+	db, err = open(DataBaseURL)
+	if err != nil {
+		log.Fatalf("Error connecting to database: %s", err)
+	}
+
+	SQLStatement := `
+        SELECT "key", value, value_type
+        FROM settings
+        ORDER BY updated_at ASC
+    `
+
+	if appName != "" {
+		SQLStatement = `
+        SELECT "key", value, value_type
+        FROM settings
+        WHERE "key" LIKE %s
+        ORDER BY updated_at ASC`
+
+		SQLStatement = fmt.Sprintf(SQLStatement, "'"+appName+".%'")
+	}
+
+	rows, err := db.Queryx(SQLStatement)
+	if err != nil {
+		log.Fatalf("Error executing query: %s", err)
+	}
+
+	defer rows.Close()
+	var configMap = make(map[string]string)
+
+	for rows.Next() {
+		var key, value, valueType string
+		err := rows.Scan(&key, &value, &valueType)
+		if err != nil {
+			return nil, err
+		}
+
+		value = strings.TrimSpace(value)
+		configMap[key] = value
+	}
+
+	return configMap, nil
 }
 
-func runLua(luaScript string) error {
+func populateStruct(data map[string]string, out any) error {
+	v := reflect.ValueOf(out)
+	if v.Kind() != reflect.Pointer || v.Elem().Kind() != reflect.Struct {
+		return errors.New("out must be pointer to struct")
+	}
+	v = v.Elem()
+	t := v.Type()
+
+	for i := 0; i < v.NumField(); i++ {
+		field := t.Field(i)
+		key := field.Name
+		strVal, ok := data[key]
+		if !ok {
+			continue
+		}
+
+		fv := v.Field(i)
+		if !fv.CanSet() {
+			continue
+		}
+
+		switch fv.Kind() {
+		case reflect.String:
+			fv.SetString(strVal)
+
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			parsed, err := strconv.ParseInt(strVal, 10, fv.Type().Bits())
+			if err != nil {
+				return fmt.Errorf("parse int %q for %s: %w", strVal, key, err)
+			}
+			fv.SetInt(parsed)
+
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			parsed, err := strconv.ParseUint(strVal, 10, fv.Type().Bits())
+			if err != nil {
+				return fmt.Errorf("parse uint %q for %s: %w", strVal, key, err)
+			}
+			fv.SetUint(parsed)
+
+		case reflect.Float32, reflect.Float64:
+			parsed, err := strconv.ParseFloat(strVal, fv.Type().Bits())
+			if err != nil {
+				return fmt.Errorf("parse float %q for %s: %w", strVal, key, err)
+			}
+			fv.SetFloat(parsed)
+
+		case reflect.Bool:
+			parsed, err := strconv.ParseBool(strVal)
+			if err != nil {
+				return fmt.Errorf("parse bool %q for %s: %w", strVal, key, err)
+			}
+			fv.SetBool(parsed)
+		case reflect.Slice:
+			// Assuming the slice is of type []string
+			// value separated by space " "
+
+			parsed := strings.Split(strVal, " ")
+			slice := reflect.MakeSlice(fv.Type(), len(parsed), len(parsed))
+			for j, v := range parsed {
+				slice.Index(j).Set(reflect.ValueOf(v))
+			}
+			fv.Set(slice)
+
+		default:
+			log.Fatalf("unsupported field type %s for field %s", fv.Kind(), field.Name)
+		}
+	}
+
+	return nil
+}
+
+func Load() error {
+	CFG = &Config{}
+
 	execName, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	execName = filepath.Base(execName)
-	appName := execName
-
-	ls := lua.NewState()
-	ls.PreloadModule("math", lua.OpenMath)
-
-	ls.SetGlobal("AppName", lua.LString(appName))
-
-	ls.SetGlobal("APIBaseURL", lua.LString(CFG.APIBaseURL))
-	ls.SetGlobal("Version", lua.LString(CFG.Version))
-
-	err = ls.DoString(luaScript)
-	if err != nil {
-		return err
+	appName := os.Getenv("APP_NAME")
+	if appName == "" {
+		appName = execName
 	}
 
-	CFG.APIBaseURL = castLuaString(ls, "APIBaseURL")
-	// CFG.Version = castLuaString(ls, "Version")
+	configMap := make(map[string]string)
+
+	configMap, err = getParameters("")
+	if err != nil {
+		log.Fatalf("Error getting parameters: %s", err)
+	}
+
+	err = populateStruct(configMap, CFG)
+	if err != nil {
+		log.Fatalf("Error populating struct: %s", err)
+	}
+
+	configMap, err = getParameters(appName)
+	if err != nil {
+		log.Fatalf("Error getting parameters: %s", err)
+	}
+
+	for k, v := range configMap {
+		k = strings.TrimPrefix(k, appName+".")
+		configMap[k] = v
+	}
+
+	err = populateStruct(configMap, CFG)
+	if err != nil {
+		log.Fatalf("Error populating struct: %s", err)
+	}
 
 	return nil
-}
-
-func CreateKey() string {
-	const (
-		length  = 32
-		charset = "-_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-	)
-	lenCharset := byte(len(charset))
-	b := make([]byte, length)
-	rand.Read(b)
-	for i := 0; i < length; i++ {
-		b[i] = charset[b[i]%lenCharset]
-	}
-	return string(b)
-}
-
-func Encript(key, value string) string {
-	if len(key) != 32 {
-		log.Fatalf("Key deve ter 32 caracteres")
-	}
-	if len(value) == 0 {
-		log.Fatalf("Value não pode ser vazio")
-	}
-
-	c, err := aes.NewCipher([]byte(key))
-	if err != nil {
-		log.Fatalf("Erro ao criar cipher: %s", err)
-	}
-
-	b := make([]byte, 2)
-	_, err = rand.Read(b)
-	if err != nil {
-		log.Fatalf("Erro ao criar byte aleatório: %s", err)
-	}
-
-	value = string(b) + value
-
-	gcm, err := cipher.NewGCM(c)
-	if err != nil {
-		log.Fatalf("Erro ao criar GCM: %s", err)
-	}
-
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		log.Fatalf("Erro ao criar nonce: %s", err)
-	}
-
-	value = string(gcm.Seal(nonce, nonce, []byte(value), nil))
-	value = base64.StdEncoding.EncodeToString([]byte(value))
-
-	return value
-}
-
-func Decrypt(key, value string) string {
-	if len(key) != 32 {
-		log.Fatalf("Key deve ter 32 caracteres")
-	}
-	if len(value) == 0 {
-		log.Fatalf("Value não pode ser vazio")
-	}
-
-	c, err := aes.NewCipher([]byte(key))
-	if err != nil {
-		log.Fatalf("Erro ao criar cipher: %s", err)
-	}
-
-	gcm, err := cipher.NewGCM(c)
-	if err != nil {
-		log.Fatalf("Erro ao criar GCM: %s", err)
-	}
-
-	valueDecoded, err := base64.StdEncoding.DecodeString(value)
-	if err != nil {
-		log.Fatalf("Erro ao decodificar value: %s", err)
-	}
-
-	nonceSize := gcm.NonceSize()
-	nonce, ciphertext := valueDecoded[:nonceSize], valueDecoded[nonceSize:]
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		log.Fatalf("Erro ao decodificar value: %s", err)
-	}
-
-	plaintext = plaintext[2:]
-
-	return string(plaintext)
-}
-
-func getEnvInt(key string, defaultValue int) int {
-	value, ok := os.LookupEnv(key)
-	if ok {
-		v, err := strconv.Atoi(value)
-		if err != nil {
-			log.Fatalf("Erro ao converter %s para int: %s", key, err)
-		}
-		return v
-	}
-	return defaultValue
-}
-
-func getEnvString(key string, defaultValue string) string {
-	value, ok := os.LookupEnv(key)
-	if ok {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvBool(key string, defaultValue bool) bool {
-	value, ok := os.LookupEnv(key)
-	if ok {
-		v, err := strconv.ParseBool(value)
-		if err != nil {
-			log.Fatalf("Erro ao converter %s para bool: %s", key, err)
-		}
-		return v
-	}
-	return defaultValue
-}
-
-func processDefaultInt(value int, environmentVar string, defaultValue int) int {
-	if value == 0 {
-		return getEnvInt(environmentVar, defaultValue)
-	}
-	return value
-}
-
-func processDefaultString(value string, environmentVar string, defaultValue string) string {
-	if value == "" {
-		return getEnvString(environmentVar, defaultValue)
-	}
-	return value
-}
-
-func processDefaultBool(value bool, environmentVar string, defaultValue bool) bool {
-	if value == false {
-		return getEnvBool(environmentVar, defaultValue)
-	}
-	return value
-}
-
-func setDefaultStr(value string, defaultValue string) string {
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-func setDefaultInt(value int, defaultValue int) int {
-	if value == 0 {
-		return defaultValue
-	}
-	return value
-}
-
-func Load() error {
-	CFG = &Config{}
-	CFG.Version = GitTag
-	if CFG.Version == "" {
-		CFG.Version = "dev"
-	}
-
-	configFile := "config.lua"
-	log.Printf("Using config file %q", configFile)
-
-	b, err := os.ReadFile(configFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Printf("Config file %q not found", configFile)
-			return err
-		}
-
-		log.Panicf("Error reading config file: %v", err)
-	}
-
-	err = runLua(string(b))
-	if err != nil {
-		log.Printf("Error running lua script: %v", err)
-		return err
-	}
-
-	return err
-}
-
-func ListEnvVariables() {
-	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "GASGO_") {
-			fmt.Println(e)
-		}
-	}
-}
-
-func ShowConfig() string {
-	b, err := json.MarshalIndent(CFG, "", "  ")
-	if err != nil {
-		log.Printf("Error marshalling config: %v", err)
-		return ""
-	}
-	return string(b)
 }
