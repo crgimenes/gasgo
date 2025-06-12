@@ -8,8 +8,25 @@
 
 **This is a work in progress.**
 
-We are currently writing the specification and detailing how it works.
+Currently writing the specification and detailing how it works.
 
+---
+
+## Equivalent types between Go and SQL databases
+
+| Go value type                         | PostgreSQL column type              | SQLite column type                    | Caveat                                                                        |
+| ------------------------------------- | ----------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------  |
+| `bool`                                | `boolean`                           | `INTEGER` (0 = false, 1 = true)       | SQLite has no native boolean; uses 0/1 integers.                              |
+| `int` (= `int64` on 64-bit) / `int64` | `bigint`                            | `INTEGER`                             | Both store 64-bit signed integers.                                            |
+| `int32`                               | `integer`                           | `INTEGER`                             | 32-bit signed in PostgreSQL; SQLite stores as 64-bit but preserves the value. |
+| `uint`, `uint64`                      | `bigint` + `CHECK (col >= 0)`       | `INTEGER`                             | PostgreSQL lacks unsigned ints; enforce non-negative with a CHECK constraint. |
+| `float64`                             | `double precision`                  | `REAL`                                | 64-bit IEEE-754 on both.                                               |
+| `string`                              | `text` / `varchar(n)`               | `TEXT`                                | Variable-length UTF-8.                                                 |
+| `[]byte`                              | `bytea`                             | `BLOB`                                | Raw binary data.                                                       |
+| `time.Time`                           | `timestamptz`                       | `TEXT` (ISO-8601) or `INTEGER` epoch  | Go drivers convert automatically.                                       |
+| “Decimal” (`string` or `big.Rat`)     | `numeric(p,s)`                      | `NUMERIC` (affinity)                  | Recommended for exact monetary values.                                |
+
+---
 ## Contributing
 
 - Fork the repo on GitHub
